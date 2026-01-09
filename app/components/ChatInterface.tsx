@@ -232,6 +232,7 @@ export default function ChatInterface() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isToolRunning, setIsToolRunning] = useState<string | null>(null);
+  const [includeMetadata, setIncludeMetadata] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -338,6 +339,7 @@ export default function ChatInterface() {
         body: JSON.stringify({
           messages: messagesToApiFormat(newMessages),
           isMobile,
+          includeMetadata,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -670,7 +672,7 @@ export default function ChatInterface() {
         <div className="chat-header-left">
                     <div>
             <div className="chat-title">Maude</div>
-            <div className="chat-subtitle">Ask questions of MotherDuck data using a Claude-like interface.</div>
+            <div className="chat-subtitle">Ask questions of business data in MotherDuck using a Claude-like interface.</div>
           </div>
         </div>
         {messages.length > 0 && (
@@ -696,6 +698,15 @@ export default function ChatInterface() {
                 </button>
               ))}
             </div>
+            <label className="metadata-toggle">
+              <input
+                type="checkbox"
+                checked={includeMetadata}
+                onChange={(e) => setIncludeMetadata(e.target.checked)}
+              />
+              <span className="toggle-slider"></span>
+              <span className="toggle-label">Include metadata in prompt</span>
+            </label>
           </div>
         ) : (
           messages.map((msg, idx) => {

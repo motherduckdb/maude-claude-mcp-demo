@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createMcpClient, getToolsForClaude, executeTool, closeMcpClient } from '@/lib/mcp-client';
 import type { MessageParam, ToolResultBlockParam, ContentBlock, Tool } from '@anthropic-ai/sdk/resources/messages';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -95,16 +97,20 @@ interface ChatMessage {
 interface ChatRequest {
   messages: ChatMessage[];
   isMobile?: boolean;
+  includeMetadata?: boolean;
 }
 
 // Allowed databases - restrict access to only these
 const ALLOWED_DATABASES = ['eastlake'];
 
-const getSystemPrompt = (isMobile: boolean) => `You are a helpful data assistant with access to MotherDuck databases through the Model Context Protocol (MCP).
+const getSystemPrompt = (isMobile: boolean, metadata?: string) => `You are a helpful data assistant with access to MotherDuck databases through the Model Context Protocol (MCP).
 
 **CRITICAL - DEFAULT RESPONSE FORMAT**: You MUST respond with a complete HTML page visualization (using the Tufte style guide below) for EVERY response, UNLESS the user's message contains the word "motherduck" (case-insensitive). This is your primary output format. Query the data first, then generate a full HTML document with your analysis.
 
 ${isMobile ? `**MOBILE LAYOUT**: The user is on a mobile device. Generate reports with a single-column layout optimized for narrow screens (max-width: 400px). Use stacked sections instead of grids, larger touch-friendly text, and avoid wide tables. Keep visualizations simple and vertically oriented.
+
+` : ''}${metadata ? `**DATABASE METADATA**:
+${metadata}
 
 ` : ''}**IMPORTANT**: As you work, briefly describe what you're doing at each step so the user can follow along:
 1. Before each query, briefly state what you're looking for (e.g., "Checking the customers table..." or "Looking up product sales data...")
@@ -320,13 +326,29 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: ChatRequest = await request.json();
-    const { messages, isMobile = false } = body;
+    const { messages, isMobile = false, includeMetadata = true } = body;
+
+    console.log('[Chat API] includeMetadata:', includeMetadata);
 
     if (!messages || messages.length === 0) {
       return new Response(JSON.stringify({ error: 'No messages provided' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    // Read metadata file if requested
+    let metadata: string | undefined;
+    if (includeMetadata) {
+      try {
+        const metadataPath = join(process.cwd(), 'eastlake_metadata.md');
+        metadata = readFileSync(metadataPath, 'utf-8');
+        console.log('[Chat API] Loaded metadata file, length:', metadata.length);
+      } catch (error) {
+        console.log('[Chat API] Metadata file not found, continuing without it');
+      }
+    } else {
+      console.log('[Chat API] Metadata disabled by user');
     }
 
     // Create MCP client and get tools
@@ -360,17 +382,28 @@ export async function POST(request: NextRequest) {
           // Loop to handle tool use
           let continueLoop = true;
           let isFirstResponse = true;
+          let loopIteration = 0;
           while (continueLoop) {
+            loopIteration++;
             // Add newline separator between responses (after tool use)
             if (!isFirstResponse) {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: '\n\n' })}\n\n`));
             }
             isFirstResponse = false;
 
+            // Log the prompt being sent
+            console.log(`\n[Chat API] === PROMPT ${loopIteration} ===`);
+            for (const msg of anthropicMessages) {
+              const contentPreview = typeof msg.content === 'string'
+                ? msg.content.slice(0, 500)
+                : JSON.stringify(msg.content).slice(0, 500);
+              console.log(`[Chat API] ${msg.role}: ${contentPreview}${contentPreview.length >= 500 ? '...' : ''}`);
+            }
+
             const response = await anthropic.messages.create({
               model: 'claude-sonnet-4-20250514',
               max_tokens: 16384,
-              system: getSystemPrompt(isMobile),
+              system: getSystemPrompt(isMobile, metadata),
               tools: tools,
               messages: anthropicMessages,
               stream: true,
@@ -381,6 +414,7 @@ export async function POST(request: NextRequest) {
             let currentToolUse: { id: string; name: string; input: string } | null = null;
             let currentTextContent = '';
             let hasToolUse = false;
+            let fullResponseText = ''; // For logging
 
             for await (const event of response) {
               if (event.type === 'content_block_start') {
@@ -401,6 +435,7 @@ export async function POST(request: NextRequest) {
               } else if (event.type === 'content_block_delta') {
                 if (event.delta.type === 'text_delta') {
                   currentTextContent += event.delta.text;
+                  fullResponseText += event.delta.text; // Capture for logging
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: event.delta.text })}\n\n`));
                 } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
                   currentToolUse.input += event.delta.partial_json;
@@ -425,6 +460,14 @@ export async function POST(request: NextRequest) {
                   currentTextContent = '';
                 }
               }
+            }
+
+            // Log first 50 lines of response
+            const responseLines = fullResponseText.split('\n').slice(0, 50);
+            console.log(`[Chat API] === RESPONSE ${loopIteration} (first 50 lines) ===`);
+            console.log(responseLines.join('\n'));
+            if (fullResponseText.split('\n').length > 50) {
+              console.log(`[Chat API] ... (${fullResponseText.split('\n').length - 50} more lines)`);
             }
 
             // If there were tool uses, execute them and continue

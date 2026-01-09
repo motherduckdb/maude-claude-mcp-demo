@@ -63,9 +63,9 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  background: var(--charcoal);
-  color: var(--white);
-  border-bottom: var(--border);
+  background: transparent;
+  color: rgb(198, 97, 63);
+  border-bottom: 1px solid #ccc;
   border-radius: var(--border-radius) var(--border-radius) 0 0;
 }
 
@@ -80,20 +80,21 @@ body {
 }
 
 .chat-title {
-  font-size: 18px;
+  font-size: 27px;
   font-weight: 600;
 }
 
 .chat-subtitle {
-  font-size: 12px;
-  color: var(--disabled);
+  font-size: 18px;
+  color: var(--charcoal);
+  opacity: 0.6;
 }
 
 .chat-clear {
   padding: 8px 16px;
   background: transparent;
-  color: var(--white);
-  border: 2px solid var(--white);
+  color: rgb(198, 97, 63);
+  border: 1px solid rgb(198, 97, 63);
   border-radius: var(--border-radius);
   cursor: pointer;
   font-size: 13px;
@@ -103,9 +104,9 @@ body {
 }
 
 .chat-clear:hover {
-  background: var(--yellow);
-  color: var(--charcoal);
-  border-color: var(--yellow);
+  background: rgb(198, 97, 63);
+  color: var(--white);
+  border-color: rgb(198, 97, 63);
 }
 
 /* Messages Area */
@@ -175,6 +176,54 @@ body {
 
 .chat-example:hover {
   background: rgb(240, 238, 230);
+}
+
+/* Metadata Toggle */
+.metadata-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--charcoal);
+}
+
+.metadata-toggle input {
+  display: none;
+}
+
+.toggle-slider {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: #ccc;
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.metadata-toggle input:checked + .toggle-slider {
+  background: rgb(198, 97, 63);
+}
+
+.metadata-toggle input:checked + .toggle-slider::after {
+  transform: translateX(20px);
+}
+
+.toggle-label {
+  user-select: none;
 }
 
 /* Message Bubbles */
