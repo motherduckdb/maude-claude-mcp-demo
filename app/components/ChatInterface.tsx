@@ -611,25 +611,22 @@ export default function ChatInterface() {
       tabScrollPositions.current[activeTab] = container.scrollTop;
     }
 
-    setActiveTab(tab);
-    localStorage.setItem('mcp_active_tab', tab);
-
     // Mark that we're restoring scroll to prevent auto-scroll interference
     isRestoringScroll.current = true;
 
-    // Restore scroll position for the new tab after React re-renders
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newContainer = messagesContainerRef.current;
-        if (newContainer && tabScrollPositions.current[tab] !== undefined) {
-          newContainer.scrollTop = tabScrollPositions.current[tab];
-        }
-        // Allow auto-scroll again after a brief delay
-        setTimeout(() => {
-          isRestoringScroll.current = false;
-        }, 100);
-      });
-    });
+    // Restore scroll position immediately (before React re-renders)
+    // This minimizes flicker by setting scroll before display changes
+    if (container && tabScrollPositions.current[tab] !== undefined) {
+      container.scrollTop = tabScrollPositions.current[tab];
+    }
+
+    setActiveTab(tab);
+    localStorage.setItem('mcp_active_tab', tab);
+
+    // Allow auto-scroll again after a brief delay
+    setTimeout(() => {
+      isRestoringScroll.current = false;
+    }, 50);
   }, [activeTab]);
 
   const saveIncludeMetadata = useCallback((include: boolean) => {
@@ -1476,8 +1473,7 @@ export default function ChatInterface() {
             {HEAD_TO_HEAD_MODELS.map((model) => (
               <div
                 key={model.id}
-                className="head-to-head-tab-content"
-                style={{ display: activeTab === model.id ? 'block' : 'none' }}
+                className={`head-to-head-tab-content ${activeTab === model.id ? 'active' : ''}`}
               >
                 {(headToHeadMessages[model.id] || []).map((msg, idx) => renderMessage(msg, idx, model.id))}
                 {headToHeadLoading[model.id] && (

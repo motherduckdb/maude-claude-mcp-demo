@@ -1303,6 +1303,15 @@ body:has(.theme-quacker) {
   animation: spin 0.8s linear infinite;
 }
 
+/* Head-to-head tab content - hidden tabs stay rendered but invisible */
+.head-to-head-tab-content {
+  display: none;
+}
+
+.head-to-head-tab-content.active {
+  display: block;
+}
+
 /* Head-to-head mode - only active tab renders, content is full width */
 
 /* In head-to-head mode (Quacker theme), make messages full width */
