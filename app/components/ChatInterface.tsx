@@ -1471,18 +1471,25 @@ export default function ChatInterface() {
           </div>
         ) : isHeadToHead ? (
           /* Head-to-head mode: render ALL tabs but only show the active one */
-          /* This preserves streaming state when switching tabs */
-          /* Only render the active tab's content */
+          /* This preserves iframe scroll state when switching tabs */
           <>
-            {(headToHeadMessages[activeTab] || []).map((msg, idx) => renderMessage(msg, idx, activeTab))}
-            {headToHeadLoading[activeTab] && (
-              <div className="chat-loading-indicator">
-                <span className="chat-loading-dot" />
-                <span className="chat-loading-text">
-                  {headToHeadToolRunning[activeTab] ? 'Querying data' : 'Thinking'}
-                </span>
+            {HEAD_TO_HEAD_MODELS.map((model) => (
+              <div
+                key={model.id}
+                className="head-to-head-tab-content"
+                style={{ display: activeTab === model.id ? 'block' : 'none' }}
+              >
+                {(headToHeadMessages[model.id] || []).map((msg, idx) => renderMessage(msg, idx, model.id))}
+                {headToHeadLoading[model.id] && (
+                  <div className="chat-loading-indicator">
+                    <span className="chat-loading-dot" />
+                    <span className="chat-loading-text">
+                      {headToHeadToolRunning[model.id] ? 'Querying data' : 'Thinking'}
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </>
         ) : (
           /* Standard mode: render messages normally */
