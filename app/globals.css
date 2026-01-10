@@ -1366,7 +1366,59 @@ body:has(.theme-quacker) {
     border-top: 1px solid var(--off-white);
   }
 
+  /* Welcome state - scale down the large input for mobile */
+  .chat-input-area.welcome .chat-input {
+    padding: 14px 12px;
+    font-size: 16px;
+  }
+
+  .chat-input-area.welcome .chat-send {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
+
   .chat-message {
     max-width: 95%;
+  }
+
+  .chat-welcome {
+    padding: 24px 16px;
+  }
+}
+
+/* Extra small screens - further scale down */
+@media (max-width: 400px) {
+  .chat-input-area.welcome .chat-input {
+    padding: 12px 10px;
+    font-size: 14px;
+  }
+
+  .chat-input-area.welcome .chat-send {
+    width: 42px;
+    height: 42px;
+    font-size: 18px;
+  }
+
+  .chat-welcome {
+    padding: 16px 12px;
+  }
+
+  .chat-welcome h2 {
+    font-size: 14px;
+  }
+
+  .chat-welcome p {
+    font-size: 10px;
+    margin-bottom: 16px;
+  }
+
+  .chat-examples {
+    max-width: 100%;
+  }
+
+  .chat-example {
+    font-size: 11px;
+    padding: 8px 12px;
   }
 }
