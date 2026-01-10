@@ -455,6 +455,7 @@ export default function ChatInterface() {
   const isHeadToHead = selectedModel === 'head-to-head';
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const tabScrollPositions = useRef<Record<string, number>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -547,9 +548,23 @@ export default function ChatInterface() {
   }, []);
 
   const saveActiveTab = useCallback((tab: string) => {
+    // Save current scroll position before switching
+    const container = messagesContainerRef.current;
+    if (container) {
+      tabScrollPositions.current[activeTab] = container.scrollTop;
+    }
+
     setActiveTab(tab);
     localStorage.setItem('mcp_active_tab', tab);
-  }, []);
+
+    // Restore scroll position for the new tab (use setTimeout to allow DOM to update)
+    setTimeout(() => {
+      const newContainer = messagesContainerRef.current;
+      if (newContainer && tabScrollPositions.current[tab] !== undefined) {
+        newContainer.scrollTop = tabScrollPositions.current[tab];
+      }
+    }, 0);
+  }, [activeTab]);
 
   const saveIncludeMetadata = useCallback((include: boolean) => {
     setIncludeMetadata(include);
