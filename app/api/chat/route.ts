@@ -258,9 +258,10 @@ ${getMobileLayoutInstructions(isMobile)}${getMetadataSection(metadata)}${NARRATI
 
 ${DATABASE_RULES}
 
-You can query databases, explore schemas, and analyze data. When answering questions:
+**USE THE PROVIDED METADATA**: The DATABASE METADATA section above contains complete table schemas. DO NOT use list_tables or list_columns tools - you already have all table and column information. Go directly to running SQL queries.
 
-1. Use the list_tables and list_columns tools to explore the available tables in ${ALLOWED_DATABASES.join(' or ')}
+When answering questions:
+1. Review the DATABASE METADATA above to understand available tables and columns
 2. Use the query tool to run SQL queries against the data
 3. Format numbers and dates in a readable way
 4. Present results as a complete HTML visualization (unless "motherduck" is in the prompt)
@@ -342,13 +343,15 @@ ${getMetadataSection(metadata)}${DATABASE_RULES}
 
 ${NARRATION_INSTRUCTIONS}
 
+**CRITICAL - USE THE PROVIDED METADATA**: The DATABASE METADATA section above contains complete table schemas including all column names, types, and descriptions. DO NOT use list_tables or list_columns tools - you already have this information. Go directly to running SQL queries using the query tool.
+
 Your task:
-1. Analyze the user's question and determine what data is needed
-2. Use the available tools (list_tables, list_columns, query) to gather ALL relevant data
+1. Review the DATABASE METADATA above to understand available tables and columns
+2. Write and execute SQL queries using the query tool to gather the data needed
 3. Run multiple queries if needed to get comprehensive data
 4. After gathering data, provide a clear summary of what you found
 
-DO NOT generate any HTML or visualizations. Just gather the data and summarize your findings in plain text.
+DO NOT waste time exploring schema - use the metadata provided. DO NOT generate any HTML or visualizations. Just gather the data and summarize your findings in plain text.
 
 Format your final summary as:
 **Data Summary:**
