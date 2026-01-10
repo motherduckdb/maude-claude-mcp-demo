@@ -722,6 +722,7 @@ export default function ChatInterface() {
       let isStreamingHtml = false;
       let htmlStreamStart = -1;
       let beforeHtmlText = '';
+      let hadToolUses = false; // Track if there were actual database tool uses
 
       while (true) {
         const { done, value } = await reader.read();
@@ -846,19 +847,28 @@ export default function ChatInterface() {
                     } else {
                       const cotBlock = currentContent.find(c => c.type === 'tool_use' && c.toolName === 'chain_of_thought');
                       const finalBlocks: MessageContent[] = [];
-                      if (cotBlock) finalBlocks.push({ ...cotBlock, toolText: (cotBlock.toolText || '') + currentText, isActive: false });
-                      else finalBlocks.push({ type: 'tool_use', toolName: 'chain_of_thought', toolText: currentText, isActive: false });
+                      const finalText = (cotBlock?.toolText || '') + currentText;
+                      // If no tool uses, render as inline text; otherwise use chain_of_thought
+                      if (hadToolUses) {
+                        finalBlocks.push({ type: 'tool_use', toolName: 'chain_of_thought', toolText: finalText, isActive: false });
+                      } else if (finalText.trim()) {
+                        finalBlocks.push({ type: 'text', text: finalText });
+                      }
                       finalBlocks.push(...getVisualizations(currentContent));
                       onUpdate(finalBlocks);
                     }
                   } else {
-                    // Final content: chain_of_thought with all text
+                    // Final content: if no tool uses, render as inline text
                     const cotBlock = currentContent.find(c => c.type === 'tool_use' && c.toolName === 'chain_of_thought');
                     const finalBlocks: MessageContent[] = [];
                     const finalText = (cotBlock?.toolText || '') + currentText;
-                    finalBlocks.push({ type: 'tool_use', toolName: 'chain_of_thought', toolText: finalText, isActive: false });
+                    if (hadToolUses) {
+                      finalBlocks.push({ type: 'tool_use', toolName: 'chain_of_thought', toolText: finalText, isActive: false });
+                    } else if (finalText.trim()) {
+                      finalBlocks.push({ type: 'text', text: finalText });
+                    }
                     finalBlocks.push(...getVisualizations(currentContent));
-                    console.log(`[${modelId}] finalBlocks:`, finalBlocks.map(b => ({ type: b.type, toolName: (b as any).toolName, textLen: (b as any).toolText?.length })));
+                    console.log(`[${modelId}] finalBlocks:`, finalBlocks.map(b => ({ type: b.type, toolName: (b as any).toolName, textLen: (b as any).toolText?.length || (b as any).text?.length })));
                     onUpdate(finalBlocks);
                   }
                 } else if (currentContent.length > 0) {
@@ -870,6 +880,9 @@ export default function ChatInterface() {
                 pendingToolName = data.tool;
                 onToolStart(data.tool);
                 const isDbTool = DATABASE_TOOLS.includes(data.tool);
+                if (isDbTool) {
+                  hadToolUses = true;
+                }
                 if (isDbTool && data.sql) {
                   // Commit any pre-SQL text first, then add SQL
                   const cotIndex = currentContent.findIndex(c => c.type === 'tool_use' && c.toolName === 'chain_of_thought');
