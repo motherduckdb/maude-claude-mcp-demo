@@ -785,7 +785,7 @@ Please create a comprehensive HTML visualization report based on this data.`,
                 }
               });
 
-              const toolResults = (await Promise.all(toolResultPromises)).filter((r): r is ToolResultBlockParam => r !== null);
+              const toolResults = (await Promise.all(toolResultPromises)).filter((r) => r !== null) as ToolResultBlockParam[];
 
               // Send all tool_end events
               for (const block of toolUseBlocks) {
