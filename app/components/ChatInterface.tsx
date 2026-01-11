@@ -1427,7 +1427,8 @@ export default function ChatInterface() {
 
     const hasHtml = typeof msg.content !== 'string' && msg.content.some(block =>
       (block.type === 'html' && block.html) ||
-      (block.type === 'streaming_html' && block.htmlChunks)
+      (block.type === 'streaming_html' && block.htmlChunks) ||
+      (block.type === 'shared_report' && block.shareId)
     );
 
     const isStreamingHtml = typeof msg.content !== 'string' && msg.content.some(block =>
