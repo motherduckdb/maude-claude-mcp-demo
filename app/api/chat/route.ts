@@ -156,22 +156,188 @@ function sparklineToSvg(values: number[]): string {
 
 // Process markdown text to convert sparkline syntax to SVG
 function processSparklines(text: string): string {
-  return text.replace(/sparkline\(([^)]+)\)/g, (match, values) => {
+  // First, remove backticks around sparkline syntax so it doesn't become <code> blocks
+  let processed = text.replace(/`(sparkline\([^)]+\))`/g, '$1');
+  // Then convert sparkline syntax to SVG
+  processed = processed.replace(/sparkline\(([^)]+)\)/g, (match, values) => {
     const nums = values.split(',').map((v: string) => parseFloat(v.trim())).filter((n: number) => !isNaN(n));
     if (nums.length >= 2) {
       return sparklineToSvg(nums);
     }
     return match;
   });
+  return processed;
 }
 
-// Convert markdown to styled HTML document
-function markdownToHtml(markdown: string, metadata?: HtmlMetadata): string {
+// Convert markdown to styled HTML document with optional charts and maps
+function markdownToHtml(
+  markdown: string,
+  metadata?: HtmlMetadata,
+  charts?: Array<Record<string, unknown>>,
+  maps?: Array<Record<string, unknown>>
+): string {
   // Process sparklines before markdown rendering
   const processedMarkdown = processSparklines(markdown);
 
   // Render markdown to HTML
   const contentHtml = marked.parse(processedMarkdown) as string;
+
+  // Generate chart containers and scripts
+  const hasCharts = charts && charts.length > 0;
+  const hasMaps = maps && maps.length > 0;
+
+  const chartContainers = hasCharts
+    ? charts.map((_, i) => `<div class="chart-container"><canvas id="chart-${i}"></canvas></div>`).join('\n')
+    : '';
+
+  const mapContainers = hasMaps
+    ? maps.map((spec, i) => `<div class="map-container"><div class="map-title">${(spec as { title?: string }).title || ''}</div><div id="map-${i}" class="map-canvas"></div></div>`).join('\n')
+    : '';
+
+  // Chart.js rendering script
+  const chartScript = hasCharts ? `
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const chartData = ${JSON.stringify(charts)};
+const COLORS = ['#FFDE00', '#6FC2FF', '#53DBC9', '#FF7169', '#2BA5FF', '#F4EFEA'];
+
+chartData.forEach((spec, i) => {
+  const ctx = document.getElementById('chart-' + i).getContext('2d');
+  const labels = spec.data.map(d => d[spec.xKey]);
+  const values = spec.data.map(d => d[spec.yKey]);
+
+  let config;
+  if (spec.type === 'pie') {
+    config = {
+      type: 'pie',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          backgroundColor: COLORS,
+          borderColor: '#383838',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: { display: true, text: spec.title, font: { size: 14, family: 'Palatino, Georgia, serif' } },
+          legend: { position: 'bottom' }
+        }
+      }
+    };
+  } else if (spec.type === 'bar') {
+    config = {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: spec.yKey,
+          data: values,
+          backgroundColor: '#FFDE00',
+          borderColor: '#383838',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: { display: true, text: spec.title, font: { size: 14, family: 'Palatino, Georgia, serif' } },
+          legend: { display: false }
+        },
+        scales: {
+          y: { beginAtZero: true }
+        }
+      }
+    };
+  } else {
+    // line chart (default)
+    config = {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: spec.yKey,
+          data: values,
+          borderColor: '#2BA5FF',
+          backgroundColor: 'rgba(43, 165, 255, 0.1)',
+          borderWidth: 2,
+          tension: 0.1,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: { display: true, text: spec.title, font: { size: 14, family: 'Palatino, Georgia, serif' } },
+          legend: { display: false }
+        },
+        scales: {
+          y: { beginAtZero: false }
+        }
+      }
+    };
+  }
+
+  new Chart(ctx, config);
+});
+</script>` : '';
+
+  // Leaflet map rendering script
+  const mapScript = hasMaps ? `
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const mapData = ${JSON.stringify(maps)};
+
+mapData.forEach((spec, i) => {
+  const data = spec.data || [];
+  const valueLabel = spec.valueLabel || 'Value';
+
+  // Calculate center from data if not provided
+  let center = spec.center;
+  if (!center && data.length > 0) {
+    const avgLat = data.reduce((sum, loc) => sum + loc.lat, 0) / data.length;
+    const avgLng = data.reduce((sum, loc) => sum + loc.lng, 0) / data.length;
+    center = [avgLat, avgLng];
+  } else if (!center) {
+    center = [39.8283, -98.5795]; // Default to center of USA
+  }
+
+  const zoom = spec.zoom || 4;
+  const map = L.map('map-' + i).setView(center, zoom);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+
+  // Calculate radius based on value relative to max
+  const maxValue = Math.max(...data.map(d => d.value), 1);
+  const getRadius = (value) => Math.min(Math.max((value / maxValue) * 25, 6), 35);
+
+  data.forEach(loc => {
+    const circle = L.circleMarker([loc.lat, loc.lng], {
+      radius: getRadius(loc.value),
+      fillColor: '#FFDE00',
+      color: '#383838',
+      weight: 2,
+      fillOpacity: 0.8
+    }).addTo(map);
+
+    let popupContent = '<strong>' + loc.label + '</strong><hr style="margin:8px 0;border:none;border-top:1px solid #e2e8f0">';
+    popupContent += '<div style="display:flex;justify-content:space-between"><span style="color:#718096">' + valueLabel + ':</span><strong>' + loc.value.toLocaleString() + '</strong></div>';
+
+    if (loc.details) {
+      Object.entries(loc.details).forEach(([key, val]) => {
+        popupContent += '<div style="display:flex;justify-content:space-between"><span style="color:#718096">' + key + ':</span><span>' + (typeof val === 'number' ? val.toLocaleString() : val) + '</span></div>';
+      });
+    }
+
+    circle.bindPopup(popupContent);
+  });
+});
+</script>` : '';
 
   // Create full HTML document with Tufte-inspired styling
   const html = `<!DOCTYPE html>
@@ -210,14 +376,23 @@ function markdownToHtml(markdown: string, metadata?: HtmlMetadata): string {
         blockquote { border-left: 3px solid #ccc; padding-left: 1em; margin: 1em 0; color: #666; }
         a { color: #a00; text-decoration: none; }
         a:hover { text-decoration: underline; }
+        .chart-container { margin: 2em 0; width: 100%; }
+        .map-container { margin: 2em 0; }
+        .map-title { font-size: 1.1em; font-weight: 600; margin-bottom: 0.5em; }
+        .map-canvas { height: 400px; border: 1px solid #ddd; border-radius: 4px; }
         @media (max-width: 600px) {
             body { padding: 20px; }
             table { font-size: 0.8em; }
+            .map-canvas { height: 300px; }
         }
     </style>
 </head>
 <body>
 ${contentHtml}
+${chartContainers}
+${mapContainers}
+${chartScript}
+${mapScript}
 </body>
 </html>`;
 
@@ -1096,6 +1271,8 @@ export async function POST(request: NextRequest) {
           let needsRetry = false;
           const sqlQueries: Array<{ sql: string; result?: string }> = [];
           const intermediateOutput: string[] = [];
+          const chartSpecs: Array<Record<string, unknown>> = [];
+          const mapSpecs: Array<Record<string, unknown>> = [];
 
           while (continueLoop) {
             // Check for cancellation before each iteration
@@ -1271,6 +1448,7 @@ export async function POST(request: NextRequest) {
                   if (block.name === 'generate_chart') {
                     const chartSpec = block.input as Record<string, unknown>;
                     send({ type: 'chart', spec: chartSpec });
+                    chartSpecs.push(chartSpec); // Track for markdown HTML export
                     const result = 'Chart generated and displayed to user.';
                     logTiming(`Tool ${block.name}`, toolStartTime);
                     console.log(`[Chat API] 🔧 TOOL END #${toolCallCount}: ${block.name} - ${result}`);
@@ -1282,6 +1460,7 @@ export async function POST(request: NextRequest) {
                   } else if (block.name === 'generate_map') {
                     const mapSpec = block.input as Record<string, unknown>;
                     send({ type: 'map', spec: mapSpec });
+                    mapSpecs.push(mapSpec); // Track for markdown HTML export
                     const result = 'Map generated and displayed to user.';
                     logTiming(`Tool ${block.name}`, toolStartTime);
                     console.log(`[Chat API] 🔧 TOOL END #${toolCallCount}: ${block.name} - ${result}`);
@@ -1385,11 +1564,12 @@ export async function POST(request: NextRequest) {
                   timestamp: new Date().toISOString(),
                   isMobile,
                 };
-                const htmlFromMarkdown = markdownToHtml(fullResponseText, markdownMetadata);
+                // Include charts and maps in the HTML export
+                const htmlFromMarkdown = markdownToHtml(fullResponseText, markdownMetadata, chartSpecs, mapSpecs);
                 const contentId = await saveHtmlContent(htmlFromMarkdown, markdownMetadata);
                 if (contentId) {
                   send({ type: 'content_saved', contentId });
-                  console.log('[Chat API] Saved markdown-to-HTML content with ID:', contentId);
+                  console.log('[Chat API] Saved markdown-to-HTML content with ID:', contentId, `(${chartSpecs.length} charts, ${mapSpecs.length} maps)`);
                 }
               }
               continueLoop = false;
