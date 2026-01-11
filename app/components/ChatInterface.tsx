@@ -937,6 +937,20 @@ export default function ChatInterface() {
                     ? { ...c, contentId: savedContentId }
                     : c
                 );
+              } else if (data.type === 'cancelled') {
+                // Request was cancelled by the user
+                console.log(`[${modelId}] Request cancelled by user`);
+                // Keep any content collected so far but mark as complete
+                currentContent = currentContent.map(c =>
+                  c.type === 'tool_use' && c.isActive ? { ...c, isActive: false } : c
+                );
+                if (currentText.trim()) {
+                  currentContent.push({ type: 'text', text: currentText + '\n\n*(Cancelled)*' });
+                } else if (currentContent.length === 0) {
+                  currentContent.push({ type: 'text', text: '*(Cancelled)*' });
+                }
+                onUpdate(currentContent);
+                onDone();
               } else if (data.type === 'tool_start') {
                 pendingToolName = data.tool;
                 onToolStart(data.tool);

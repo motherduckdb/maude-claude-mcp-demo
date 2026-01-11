@@ -303,23 +303,29 @@ interface ChatRequest {
 // Allowed databases - restrict access to only these
 const ALLOWED_DATABASES = ['eastlake'];
 
-// Shared prompt components to keep instructions consistent across modes
-const DATABASE_RULES = `IMPORTANT: You only have access to the following databases: ${ALLOWED_DATABASES.join(', ')}
-Do not attempt to query or access any other databases.
+// Load prompt files from disk
+const promptsDir = join(process.cwd(), 'prompts');
 
-CRITICAL: All data in your responses (names, places, companies, products, dates, numbers) must come ONLY from actual SQL query results returned by the MotherDuck MCP server Eastlake dataset. Never invent, fabricate, or hallucinate any data values.
+function loadPromptFile(filename: string): string {
+  try {
+    return readFileSync(join(promptsDir, filename), 'utf-8');
+  } catch (error) {
+    console.error(`[Prompts] Failed to load ${filename}:`, error);
+    return '';
+  }
+}
 
-Before returning the final result, verify all names mentioned appear in the SQL results returned by the MCP server. This is critical validation required for compliance.`;
+// Cache loaded prompts
+const promptCache: Record<string, string> = {};
 
-const NARRATION_INSTRUCTIONS = `**CRITICAL - NARRATE YOUR DATABASE WORK**: Before EACH database operation, you MUST describe what you're about to do. This is mandatory:
-- Before listing tables: "Exploring available tables in the database..."
-- Before checking columns: "Checking the structure of [table_name] table..."
-- Before running a query: "Querying [brief description]..." and show the SQL query you'll run
-- After getting results: Briefly note what you found (e.g., "Found 15 customers with orders...")
-- Before generating HTML: "Generating [Report Title]..." (e.g., "Generating Customer Analysis Report...")
+function getPrompt(filename: string): string {
+  if (!promptCache[filename]) {
+    promptCache[filename] = loadPromptFile(filename);
+  }
+  return promptCache[filename];
+}
 
-This narration is essential so users can follow your progress while queries run.`;
-
+// Dynamic content generators
 const getMobileLayoutInstructions = (isMobile: boolean) => isMobile ? `**MOBILE LAYOUT**: The user is on a mobile device. Generate reports with a single-column layout optimized for narrow screens (max-width: 400px). Use stacked sections instead of grids, larger touch-friendly text, and avoid wide tables. Keep visualizations simple and vertically oriented.
 
 ` : '';
@@ -329,208 +335,73 @@ ${metadata}
 
 ` : '';
 
-// Instructions to use metadata instead of schema exploration (only when metadata is provided)
 const getMetadataUsageInstructions = (metadata?: string) => metadata ? `**USE THE PROVIDED METADATA**: The DATABASE METADATA section above contains complete table schemas. DO NOT use list_tables or list_columns tools - you already have all table and column information. Go directly to running SQL queries.
 
 ` : '';
 
-const TUFTE_STYLE_GUIDE = `TUFTE STYLE GUIDE FOR HTML GENERATION:
-
-Core Philosophy:
-1. Maximize data-ink ratio — Every pixel should convey information. Remove chartjunk and decorative elements.
-2. Small multiples — Use consistent visual encoding across repeated elements for easy comparison.
-3. Integrate text and data — Weave narrative prose with inline statistics.
-4. High information density — Pack maximum insight into minimum space.
-
-Typography:
-- Use Google Fonts: Source Sans Pro for numbers, system serif (Palatino, Georgia) for text
-- Big numbers: 42px, letter-spacing: -1px
-- Section headers: 11px uppercase, letter-spacing: 1.5px
-- Body: 14px, line-height: 1.6
-- Tables: 12px body, 10px headers
-
-Color Palette:
-- Background: #fffff8 (warm cream, Tufte signature)
-- Text: #111 (primary), #666 (secondary), #999 (tertiary)
-- Accent: #a00 (burgundy - use sparingly for emphasis)
-- Lines/borders: #ccc
-- Bars: #888 (grayscale)
-
-Layout:
-- padding: 40px 60px, max-width: 1200px
-- Use CSS Grid: 4-col for KPIs, 2-col for main content, 3-col for details
-- Section spacing: 28px between major sections
-
-Components to use:
-- Big numbers with small labels for KPIs
-- Inline bar charts in tables (div with percentage width)
-- SVG sparklines with area fill and accent dot on final point
-- Horizontal bar rows for year-over-year comparisons
-- Tables with right-aligned numeric columns using tabular-nums
-
-Anti-patterns (avoid):
-- No pie charts (use tables with inline bars)
-- No 3D effects, gradients for decoration
-- No colored section backgrounds
-- No chart borders/frames
-- No excessive gridlines`;
-
-const HTML_TEMPLATE = `HTML Template structure:
-\`\`\`html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600&display=swap" rel="stylesheet">
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: Palatino, Georgia, serif;
-            background: #fffff8;
-            padding: 40px 60px;
-            max-width: 1200px;
-            margin: 0 auto;
-            color: #111;
-        }
-        .num { font-family: 'Source Sans Pro', sans-serif; font-variant-numeric: tabular-nums; }
-        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; }
-        .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 40px; }
-        .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #999; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 12px; }
-        .big-number { font-size: 42px; letter-spacing: -1px; line-height: 1; }
-        .big-number-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-top: 4px; }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        th { text-align: left; font-weight: 400; color: #999; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 8px 4px 0; border-bottom: 1px solid #ccc; }
-        td { padding: 5px 8px 5px 0; border-bottom: 1px solid #eee; }
-        .bar-container { background: #f0f0f0; height: 12px; width: 100px; }
-        .bar { background: #888; height: 100%; }
-        .highlight { background: rgba(160,0,0,0.08); padding: 0 3px; }
-        .accent { color: #a00; }
-    </style>
-</head>
-<body>
-    <!-- KPI row, main content, detail sections -->
-</body>
-</html>
-\`\`\``;
-
-const getSystemPrompt = (isMobile: boolean, metadata?: string) => `You are a helpful data assistant employed by Eastlake with access to MotherDuck databases through the Model Context Protocol (MCP). All analysis, numbers and key people, companies, places and things should be based solely on data returned from the MotherDuck MCP server.
-
-**CRITICAL - DEFAULT RESPONSE FORMAT**: You MUST respond with a complete HTML page visualization (using the Tufte style guide below) for EVERY response, UNLESS the user's message contains the word "motherduck" (case-insensitive). This is your primary output format. Query the data first, then generate a full HTML document with your analysis.
-
-${getMobileLayoutInstructions(isMobile)}${getMetadataSection(metadata)}${getMetadataUsageInstructions(metadata)}${NARRATION_INSTRUCTIONS}
-
-${DATABASE_RULES}
-
-When answering questions:
-1. ${metadata ? 'Review the DATABASE METADATA above' : 'Use list_tables and list_columns tools'} to understand available tables and columns
-2. Use the query tool to run SQL queries against the data
-3. Format numbers and dates in a readable way
-4. Present results as a complete HTML visualization (unless "motherduck" is in the prompt)
-
-CHARTS: You can generate charts to visualize data using the generate_chart tool. After querying data, consider creating a chart when:
-- The user asks about trends over time (use line chart)
-- The user asks for comparisons between categories (use bar chart)
-- The user asks about proportions or distributions (use pie chart)
-- The user asks about process stability or statistical variation (use xmr chart)
-
-When generating charts:
-- Keep data to a reasonable number of points (10-20 for line/bar/xmr, 5-8 for pie)
-- Use clear, descriptive titles
-- For time series, format dates as short strings (e.g., "Jan 1", "Dec 15")
-
-SPARKLINES: When displaying tabular data with time-series values (like revenue over time per customer), you can embed mini sparkline charts directly in table cells. To create a sparkline, use this syntax in a table cell:
-  sparkline(value1,value2,value3,...)
-
-CRITICAL SPARKLINE RULE: Sparklines MUST have EXACTLY 6 data points. No more, no less. When querying data for sparklines, always aggregate to exactly 6 time periods (e.g., 6 months, 6 quarters, or 6 evenly-spaced samples). This is a hard requirement for performance.
-
-Example table with sparklines (note: exactly 6 values each):
-| Customer | Total Revenue | Trend |
-|----------|---------------|-------|
-| Acme Inc | $45,000 | sparkline(12,15,18,21,24,26) |
-| Beta Corp | $32,000 | sparkline(8,7,9,11,12,14) |
-
-Use sparklines when:
-- Showing trends alongside summary data in tables
-- Comparing patterns across multiple entities (customers, products, regions)
-- The user asks for "trends" or "over time" data in a tabular format
-
-The sparkline values should be the actual numeric data points (not formatted with currency symbols). Use simple integers when possible (e.g., divide by 1000 for thousands). Remember: EXACTLY 6 data points per sparkline.
-
-MAPS: You can generate interactive maps using the generate_map tool when data has geographic information. Use maps when:
-- The user asks about regional or geographic analysis
-- Data includes cities, states, countries, or coordinates
-- The user explicitly asks for a map visualization
-- Analyzing sales, customers, or orders by location
-
-When generating maps:
-- Each data point needs: lat (latitude), lng (longitude), label (location name), value (numeric value for marker size)
-- Optionally include details object with additional key-value pairs to show in the popup
-- Use valueLabel to describe what the value represents (e.g., "Revenue", "Orders")
-- For US data, common city coordinates can be approximated or queried if available
-- Keep data points reasonable (20-50 locations max for readability)
-
-Example map data format:
-{
-  "title": "Sales by Region",
-  "valueLabel": "Revenue",
-  "data": [
-    {"lat": 40.7128, "lng": -74.0060, "label": "New York", "value": 125000, "details": {"Orders": 450, "Customers": 120}},
-    {"lat": 34.0522, "lng": -118.2437, "label": "Los Angeles", "value": 98000, "details": {"Orders": 320, "Customers": 95}}
-  ]
+// Compose a prompt by replacing placeholders with actual content
+function composePrompt(template: string, replacements: Record<string, string>): string {
+  let result = template;
+  for (const [key, value] of Object.entries(replacements)) {
+    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+  }
+  // Remove any unreplaced placeholders
+  result = result.replace(/\{\{[A-Z_]+\}\}/g, '');
+  return result;
 }
 
-Always explain your findings clearly and offer to provide more detail if needed.
+// Build the system prompt for standalone mode (any model)
+const getSystemPrompt = (isMobile: boolean, metadata?: string) => {
+  const template = getPrompt('standalone-system-prompt.md');
 
-HTML VISUALIZATIONS: When asked for detailed analysis, dashboards, or rich visualizations, generate a complete HTML page following the Tufte style guide below. Return the HTML inside a markdown code block with the html language tag. The HTML will be rendered in an iframe.
+  // Strip the markdown header
+  const content = template.replace(/^# .*\n+/, '');
 
-IMPORTANT: When generating HTML responses, do NOT use our custom tools (generate_chart, generate_map, sparkline() syntax). Instead, use standard HTML/CSS/JavaScript techniques:
-- SVG for sparklines and charts (inline SVG paths)
-- CSS for bar charts (div elements with percentage widths)
-- Any standard JavaScript charting libraries if needed (Chart.js, D3.js, etc.)
-- The HTML should be fully self-contained and render independently in an iframe.
+  return composePrompt(content, {
+    'MOBILE_LAYOUT_INSTRUCTIONS': getMobileLayoutInstructions(isMobile),
+    'DATABASE_METADATA': getMetadataSection(metadata),
+    'METADATA_USAGE_INSTRUCTIONS': getMetadataUsageInstructions(metadata),
+    'NARRATION_DATABASE': getPrompt('narration-database.md').replace(/^# .*\n+/, ''),
+    'NARRATION_REPORT': getPrompt('narration-report.md').replace(/^# .*\n+/, ''),
+    'DATABASE_RULES': getPrompt('database-rules.md').replace(/^# .*\n+/, '').replace('{{ALLOWED_DATABASES}}', ALLOWED_DATABASES.join(', ')),
+    'SCHEMA_EXPLORATION_STEP': metadata ? 'Review the DATABASE METADATA above' : 'Use list_tables and list_columns tools',
+    'TUFTE_STYLE_GUIDE': getPrompt('tufte-style-guide.md').replace(/^# .*\n+/, ''),
+    'HTML_TEMPLATE': getPrompt('html-template.md').replace(/^# .*\n+/, ''),
+  });
+};
 
-${TUFTE_STYLE_GUIDE}
+// Build the data gathering prompt for Gemini in blended mode
+const getDataGatheringPrompt = (metadata?: string) => {
+  const template = getPrompt('blended-data-gathering-prompt.md');
 
-${HTML_TEMPLATE}
+  // Strip the markdown header
+  const content = template.replace(/^# .*\n+/, '');
 
-IMPORTANT: Do not end your responses with colons. Avoid phrases like "Here are the results:" or "Let me check:" before using tools. Instead, just use the tool and then present the findings directly.
+  return composePrompt(content, {
+    'DATABASE_METADATA': getMetadataSection(metadata),
+    'METADATA_USAGE_INSTRUCTIONS': getMetadataUsageInstructions(metadata),
+    'DATABASE_RULES': getPrompt('database-rules.md').replace(/^# .*\n+/, '').replace('{{ALLOWED_DATABASES}}', ALLOWED_DATABASES.join(', ')),
+    'NARRATION_DATABASE': getPrompt('narration-database.md').replace(/^# .*\n+/, ''),
+    'SCHEMA_EXPLORATION_STEP': metadata ? 'Review the DATABASE METADATA above' : 'Use list_tables and list_columns tools',
+    'SKIP_SCHEMA_INSTRUCTION': metadata ? 'DO NOT waste time exploring schema - use the metadata provided. ' : '',
+  });
+};
 
-REMINDER: Your response MUST be a complete HTML page inside a \`\`\`html code block (unless "motherduck" appears in the user's message). Always generate HTML output by default.`;
+// Build the report generation prompt for Opus in blended mode
+const getReportGenerationPrompt = (isMobile: boolean) => {
+  const template = getPrompt('blended-report-generation-prompt.md');
 
-// System prompt for Gemini in blended mode - focused on data gathering only
-const getDataGatheringPrompt = (metadata?: string) => `You are a data analyst assistant employed by Eastlake gathering data from MotherDuck databases. Your job is to collect all the data needed to answer the user's question.
+  // Strip the markdown header
+  const content = template.replace(/^# .*\n+/, '');
 
-${getMetadataSection(metadata)}${getMetadataUsageInstructions(metadata)}${DATABASE_RULES}
-
-${NARRATION_INSTRUCTIONS}
-
-Your task:
-1. ${metadata ? 'Review the DATABASE METADATA above' : 'Use list_tables and list_columns tools'} to understand available tables and columns
-2. Write and execute SQL queries using the query tool to gather the data needed
-3. Run multiple queries if needed to get comprehensive data
-4. After gathering data, provide a clear summary of what you found
-
-${metadata ? 'DO NOT waste time exploring schema - use the metadata provided. ' : ''}DO NOT generate any HTML or visualizations. Just gather the data and summarize your findings in plain text.
-
-Format your final summary as:
-**Data Summary:**
-- Describe what data was collected
-- Include key statistics and findings
-- Note any relevant patterns or insights
-
-**Raw Data:**
-Include the actual query results that will be used for visualization.`;
-
-// System prompt for Opus in blended mode - focused on HTML generation from provided data
-const getReportGenerationPrompt = (isMobile: boolean) => `You are an expert data visualization specialist employed by Eastlake. You have been provided with data that was gathered by another assistant. Your job is to create a beautiful, insightful HTML report from this data.
-
-${getMobileLayoutInstructions(isMobile)}Generate a complete HTML page following the Tufte style guide:
-
-${TUFTE_STYLE_GUIDE}
-
-${HTML_TEMPLATE}
-
-Return ONLY the complete HTML page inside a \`\`\`html code block. Include insightful analysis woven into the visualization.`;
+  return composePrompt(content, {
+    'MOBILE_LAYOUT_INSTRUCTIONS': getMobileLayoutInstructions(isMobile),
+    'DATABASE_RULES': getPrompt('database-rules.md').replace(/^# .*\n+/, '').replace('{{ALLOWED_DATABASES}}', ALLOWED_DATABASES.join(', ')),
+    'NARRATION_REPORT': getPrompt('narration-report.md').replace(/^# .*\n+/, ''),
+    'TUFTE_STYLE_GUIDE': getPrompt('tufte-style-guide.md').replace(/^# .*\n+/, ''),
+    'HTML_TEMPLATE': getPrompt('html-template.md').replace(/^# .*\n+/, ''),
+  });
+};
 
 // Check if a database reference is allowed
 function isDatabaseAllowed(dbName: string): boolean {
@@ -590,7 +461,15 @@ function convertToAnthropicMessages(messages: ChatMessage[]): MessageParam[] {
   }));
 }
 
+// Helper to check if request was aborted
+function isAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
+}
+
 export async function POST(request: NextRequest) {
+  // Get abort signal from request for cancellation support
+  const abortSignal = request.signal;
+
   try {
     const body: ChatRequest = await request.json();
     const { messages, isMobile = false, includeMetadata = true, model, shareId } = body;
@@ -619,16 +498,13 @@ export async function POST(request: NextRequest) {
         const lastUserMessageIndex = processedMessages.findLastIndex(m => m.role === 'user');
         if (lastUserMessageIndex !== -1) {
           const originalMessage = processedMessages[lastUserMessageIndex].content;
+          const template = getPrompt('user-shared-report-context.md').replace(/^# .*\n+/, '');
           processedMessages[lastUserMessageIndex] = {
             ...processedMessages[lastUserMessageIndex],
-            content: `[Context: The user is asking a follow-up question about a previously generated report. The full HTML of that report is provided below for context.]
-
-=== PREVIOUS REPORT HTML ===
-${sharedHtml}
-=== END PREVIOUS REPORT ===
-
-[User's follow-up question]:
-${originalMessage}`
+            content: composePrompt(template, {
+              'SHARED_HTML': sharedHtml,
+              'ORIGINAL_MESSAGE': originalMessage as string,
+            }),
           };
         }
       }
@@ -708,6 +584,15 @@ ${originalMessage}`
             const blendedIntermediateOutput: string[] = [];
 
             while (continueGathering) {
+              // Check for cancellation before each iteration
+              if (isAborted(abortSignal)) {
+                console.log('[Chat API] Request aborted by client during Gemini data gathering');
+                send({ type: 'cancelled' });
+                controller.close();
+                if (mcpClient) await closeMcpClient(mcpClient);
+                return;
+              }
+
               geminiNeedsRetry = false;
               gatherIteration++;
               console.log(`[Chat API] Blended Phase 1 - Iteration ${gatherIteration}`);
@@ -874,20 +759,29 @@ ${originalMessage}`
             }
 
             console.log('[Chat API] Blended Phase 1 complete. Data collected:', collectedData.length, 'chars');
+
+            // Check for cancellation before Opus phase
+            if (isAborted(abortSignal)) {
+              console.log('[Chat API] Request aborted by client before Opus report generation');
+              send({ type: 'cancelled' });
+              controller.close();
+              if (mcpClient) await closeMcpClient(mcpClient);
+              return;
+            }
+
             console.log('[Chat API] Starting BLENDED mode - Phase 2: Opus report generation');
             send({ type: 'text', content: '\nGenerating report with Claude Opus...\n\n' });
 
             // Phase 2: Opus generates the report
             const userQuestion = messages[messages.length - 1]?.content || '';
+            const opusTemplate = getPrompt('user-blended-opus-input.md').replace(/^# .*\n+/, '');
             const opusMessages: MessageParam[] = [
               {
                 role: 'user',
-                content: `**User's Question:** ${userQuestion}
-
-**Collected Data:**
-${collectedData}
-
-Please create a comprehensive HTML visualization report based on this data.`,
+                content: composePrompt(opusTemplate, {
+                  'USER_QUESTION': userQuestion,
+                  'COLLECTED_DATA': collectedData,
+                }),
               },
             ];
 
@@ -897,6 +791,15 @@ Please create a comprehensive HTML visualization report based on this data.`,
             let opusFullResponse = '';
 
             while (!opusSuccess && opusRetryCount <= MAX_RETRIES) {
+              // Check for cancellation before each Opus attempt
+              if (isAborted(abortSignal)) {
+                console.log('[Chat API] Request aborted by client during Opus generation');
+                send({ type: 'cancelled' });
+                controller.close();
+                if (mcpClient) await closeMcpClient(mcpClient);
+                return;
+              }
+
               try {
                 opusFullResponse = ''; // Reset on retry
                 const opusResponse = await anthropic.messages.create({
@@ -980,6 +883,15 @@ Please create a comprehensive HTML visualization report based on this data.`,
           const intermediateOutput: string[] = [];
 
           while (continueLoop) {
+            // Check for cancellation before each iteration
+            if (isAborted(abortSignal)) {
+              console.log('[Chat API] Request aborted by client during standard mode');
+              send({ type: 'cancelled' });
+              controller.close();
+              if (mcpClient) await closeMcpClient(mcpClient);
+              return;
+            }
+
             needsRetry = false;
             loopIteration++;
             // Add newline separator between responses (after tool use)
