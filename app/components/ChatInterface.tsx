@@ -6,7 +6,7 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Sparkline, { parseSparklineData } from './Sparkline';
 import ChatChart, { ChartSpec } from './ChatChart';
-import HtmlFrame, { StreamingHtmlFrame, isHtmlContent, extractHtmlParts } from './HtmlFrame';
+import HtmlFrame, { StreamingHtmlFrame, isHtmlContent, extractHtmlParts, SharePopup } from './HtmlFrame';
 
 // Debug flag for HTML detection logging
 const DEBUG_HTML_DETECTION = false;
@@ -49,6 +49,40 @@ function SharedReportFrame({ shareId, currentIsMobile }: SharedReportFrameProps)
         title="Previous report"
         className="shared-report-iframe"
       />
+    </div>
+  );
+}
+
+// Component to render markdown with share button
+interface MarkdownWithShareProps {
+  content: string;
+  contentId: string;
+  markdownComponents: Components;
+}
+
+function MarkdownWithShare({ content, contentId, markdownComponents }: MarkdownWithShareProps) {
+  const [showSharePopup, setShowSharePopup] = useState(false);
+  const shareUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/share/${contentId}`;
+
+  return (
+    <div className="markdown-frame">
+      {showSharePopup && (
+        <SharePopup url={shareUrl} onClose={() => setShowSharePopup(false)} />
+      )}
+      <button
+        className="markdown-share-btn complete"
+        onClick={() => setShowSharePopup(true)}
+        title="Share"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="18" cy="5" r="3"></circle>
+          <circle cx="6" cy="12" r="3"></circle>
+          <circle cx="18" cy="19" r="3"></circle>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+        </svg>
+      </button>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
     </div>
   );
 }
@@ -977,8 +1011,9 @@ export default function ChatInterface() {
                         finalBlocks.push({ type: 'tool_use', toolName: 'chain_of_thought', toolText: cotBlock.toolText, isActive: false });
                       }
                       // currentText after all tool uses is the final answer - render as markdown
+                      // Include contentId if available (for sharing markdown responses)
                       if (currentText.trim()) {
-                        finalBlocks.push({ type: 'text', text: currentText });
+                        finalBlocks.push({ type: 'text', text: currentText, contentId: savedContentId || undefined });
                       }
                       finalBlocks.push(...getVisualizations(currentContent));
                       onUpdate(finalBlocks);
@@ -992,14 +1027,15 @@ export default function ChatInterface() {
                       finalBlocks.push({ type: 'tool_use', toolName: 'chain_of_thought', toolText: cotBlock.toolText, isActive: false });
                     }
                     // currentText after all tool uses is the final answer - render as markdown
+                    // Include contentId if available (for sharing markdown responses)
                     if (currentText.trim()) {
-                      finalBlocks.push({ type: 'text', text: currentText });
+                      finalBlocks.push({ type: 'text', text: currentText, contentId: savedContentId || undefined });
                     } else if (!hadToolUses && cotBlock?.toolText) {
                       // No tool uses and no currentText but has cotBlock - render as text
-                      finalBlocks.push({ type: 'text', text: cotBlock.toolText });
+                      finalBlocks.push({ type: 'text', text: cotBlock.toolText, contentId: savedContentId || undefined });
                     }
                     finalBlocks.push(...getVisualizations(currentContent));
-                    console.log(`[${modelId}] finalBlocks:`, finalBlocks.map(b => ({ type: b.type, toolName: (b as any).toolName, textLen: (b as any).toolText?.length || (b as any).text?.length })));
+                    console.log(`[${modelId}] finalBlocks:`, finalBlocks.map(b => ({ type: b.type, toolName: (b as any).toolName, textLen: (b as any).toolText?.length || (b as any).text?.length, contentId: (b as any).contentId })));
                     onUpdate(finalBlocks);
                   }
                 } else if (currentContent.length > 0) {
@@ -1546,7 +1582,12 @@ export default function ChatInterface() {
                 let displayText = filterHtmlFromText(block.text);
                 displayText = filterSqlFromText(displayText);
                 if (!displayText.trim()) return null;
-                return <ReactMarkdown key={blockKey} remarkPlugins={[remarkGfm]} components={markdownComponents}>{displayText}</ReactMarkdown>;
+                const markdownContent = <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{displayText}</ReactMarkdown>;
+                // If contentId is present, use MarkdownWithShare component for consistent share dialog
+                if (block.contentId) {
+                  return <MarkdownWithShare key={blockKey} content={displayText} contentId={block.contentId} markdownComponents={markdownComponents} />;
+                }
+                return <div key={blockKey}>{markdownContent}</div>;
               }
               if (block.type === 'chart' && block.chart) {
                 return <ChatChart key={blockKey} spec={block.chart} />;

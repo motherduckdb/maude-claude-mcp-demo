@@ -14,6 +14,7 @@
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@types/leaflet": "^1.9.21",
     "leaflet": "^1.9.4",
+    "marked": "^17.0.1",
     "next": "^14.0.0",
     "pg": "^8.16.3",
     "react": "^18.2.0",

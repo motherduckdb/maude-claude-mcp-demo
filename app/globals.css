@@ -900,6 +900,39 @@ body {
   position: relative;
 }
 
+/* Markdown frame with share button */
+.markdown-frame {
+  position: relative;
+  padding-right: 40px;
+}
+
+.markdown-share-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ddd;
+  transition: all 0.15s ease;
+}
+
+.markdown-share-btn.complete {
+  color: rgb(170, 0, 0);
+}
+
+.markdown-share-btn:hover {
+  background: #fff;
+  color: rgb(200, 0, 0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
 .html-frame-share {
   position: absolute;
   top: 8px;

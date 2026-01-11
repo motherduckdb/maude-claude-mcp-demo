@@ -5,6 +5,7 @@ import type { MessageParam, ToolResultBlockParam, ContentBlock, Tool } from '@an
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { query } from '@/lib/planetscale';
+import { marked } from 'marked';
 
 // Generate a random ID for content storage
 function generateContentId(length: number = 64): string {
@@ -132,6 +133,95 @@ ${metadata.intermediateOutput.map(o => escapeHtmlComment(o)).join('\n\n')}
     return doctypeMatch[1] + metadataComment + html.slice(doctypeMatch[1].length);
   }
   return metadataComment + html;
+}
+
+// Convert sparkline syntax to inline SVG
+function sparklineToSvg(values: number[]): string {
+  if (values.length === 0) return '';
+  const width = 80;
+  const height = 20;
+  const padding = 2;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  const points = values.map((v, i) => {
+    const x = padding + (i / (values.length - 1)) * (width - padding * 2);
+    const y = height - padding - ((v - min) / range) * (height - padding * 2);
+    return `${x},${y}`;
+  }).join(' ');
+
+  return `<svg width="${width}" height="${height}" style="vertical-align: middle;"><polyline fill="none" stroke="#666" stroke-width="1.5" points="${points}"/></svg>`;
+}
+
+// Process markdown text to convert sparkline syntax to SVG
+function processSparklines(text: string): string {
+  return text.replace(/sparkline\(([^)]+)\)/g, (match, values) => {
+    const nums = values.split(',').map((v: string) => parseFloat(v.trim())).filter((n: number) => !isNaN(n));
+    if (nums.length >= 2) {
+      return sparklineToSvg(nums);
+    }
+    return match;
+  });
+}
+
+// Convert markdown to styled HTML document
+function markdownToHtml(markdown: string, metadata?: HtmlMetadata): string {
+  // Process sparklines before markdown rendering
+  const processedMarkdown = processSparklines(markdown);
+
+  // Render markdown to HTML
+  const contentHtml = marked.parse(processedMarkdown) as string;
+
+  // Create full HTML document with Tufte-inspired styling
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: Palatino, Georgia, serif;
+            background: #fffff8;
+            padding: 40px 60px;
+            max-width: 900px;
+            margin: 0 auto;
+            color: #111;
+            line-height: 1.6;
+        }
+        h1 { font-size: 2em; font-weight: normal; margin-bottom: 0.5em; border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }
+        h2 { font-size: 1.5em; font-weight: normal; margin-top: 1.5em; margin-bottom: 0.5em; color: #333; }
+        h3 { font-size: 1.2em; font-weight: 600; margin-top: 1.2em; margin-bottom: 0.4em; }
+        p { margin-bottom: 1em; }
+        table { width: 100%; border-collapse: collapse; margin: 1.5em 0; font-size: 0.9em; }
+        th { text-align: left; font-weight: 400; color: #666; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 12px 8px 0; border-bottom: 2px solid #ccc; }
+        td { padding: 10px 12px 10px 0; border-bottom: 1px solid #eee; vertical-align: middle; }
+        th:last-child, td:last-child { text-align: right; padding-right: 0; }
+        tr:hover { background: rgba(0,0,0,0.02); }
+        .num { font-family: 'Source Sans Pro', sans-serif; font-variant-numeric: tabular-nums; }
+        code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+        pre { background: #f5f5f5; padding: 16px; border-radius: 4px; overflow-x: auto; margin: 1em 0; }
+        pre code { background: none; padding: 0; }
+        ul, ol { margin: 1em 0; padding-left: 1.5em; }
+        li { margin-bottom: 0.5em; }
+        strong { font-weight: 600; }
+        blockquote { border-left: 3px solid #ccc; padding-left: 1em; margin: 1em 0; color: #666; }
+        a { color: #a00; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        @media (max-width: 600px) {
+            body { padding: 20px; }
+            table { font-size: 0.8em; }
+        }
+    </style>
+</head>
+<body>
+${contentHtml}
+</body>
+</html>`;
+
+  return html;
 }
 
 // Save HTML content to database and return ID
@@ -1267,7 +1357,7 @@ export async function POST(request: NextRequest) {
                 { role: 'user', content: toolResults },
               ];
             } else {
-              // No more tool use - check for HTML content and save it
+              // No more tool use - check for HTML or markdown content and save it
               if (containsHtml(fullResponseText)) {
                 const htmlContent = extractHtmlContent(fullResponseText);
                 if (htmlContent) {
@@ -1284,6 +1374,22 @@ export async function POST(request: NextRequest) {
                     send({ type: 'content_saved', contentId });
                     console.log('[Chat API] Saved HTML content with ID:', contentId);
                   }
+                }
+              } else if (fullResponseText.trim() && userQuestion.toLowerCase().includes('motherduck')) {
+                // Markdown response (motherduck style) - convert to HTML and save
+                const markdownMetadata: HtmlMetadata = {
+                  question: userQuestion,
+                  sqlQueries,
+                  intermediateOutput,
+                  model: selectedModel,
+                  timestamp: new Date().toISOString(),
+                  isMobile,
+                };
+                const htmlFromMarkdown = markdownToHtml(fullResponseText, markdownMetadata);
+                const contentId = await saveHtmlContent(htmlFromMarkdown, markdownMetadata);
+                if (contentId) {
+                  send({ type: 'content_saved', contentId });
+                  console.log('[Chat API] Saved markdown-to-HTML content with ID:', contentId);
                 }
               }
               continueLoop = false;

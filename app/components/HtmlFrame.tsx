@@ -22,7 +22,7 @@ interface SharePopupProps {
   onClose: () => void;
 }
 
-function SharePopup({ url, onClose }: SharePopupProps) {
+export function SharePopup({ url, onClose }: SharePopupProps) {
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
