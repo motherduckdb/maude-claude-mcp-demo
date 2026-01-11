@@ -119,7 +119,13 @@ ${metadata.intermediateOutput.map(o => escapeHtmlComment(o)).join('\n\n')}
 -->
 `;
 
-  // Insert after <!DOCTYPE html> or at the very beginning
+  // Insert inside <head> tag so it's accessible via document.documentElement.outerHTML
+  const headMatch = html.match(/(<head[^>]*>)/i);
+  if (headMatch) {
+    const headIndex = html.indexOf(headMatch[1]) + headMatch[1].length;
+    return html.slice(0, headIndex) + metadataComment + html.slice(headIndex);
+  }
+  // Fallback: insert after <!DOCTYPE html>
   const doctypeMatch = html.match(/^(<!DOCTYPE[^>]*>)/i);
   if (doctypeMatch) {
     return doctypeMatch[1] + metadataComment + html.slice(doctypeMatch[1].length);
