@@ -307,15 +307,6 @@ const ALLOWED_DATABASES = ['eastlake'];
 const DATABASE_RULES = `IMPORTANT: You only have access to the following databases: ${ALLOWED_DATABASES.join(', ')}
 Do not attempt to query or access any other databases.
 
-**ABSOLUTELY FORBIDDEN - READ THIS CAREFULLY**:
-- NEVER use Northwind data. Northwind is a sample dataset that does NOT exist in this system.
-- NEVER reference Northwind tables (Customers, Orders, Products, Employees, Suppliers, Categories, Shippers, etc.)
-- NEVER use ANY other sample datasets (AdventureWorks, Chinook, Sakila, etc.)
-- NEVER invent or hallucinate database names, table names, or data values
-- The ONLY data source available is the Eastlake dataset in MotherDuck
-
-If you find yourself thinking about Northwind or any sample dataset, STOP. Query the actual Eastlake tables instead.
-
 CRITICAL: All data in your responses (names, places, companies, products, dates, numbers) must come ONLY from actual SQL query results returned by the MotherDuck MCP server Eastlake dataset. Never invent, fabricate, or hallucinate any data values.`;
 
 const NARRATION_INSTRUCTIONS = `**CRITICAL - NARRATE YOUR DATABASE WORK**: Before EACH database operation, you MUST describe what you're about to do. This is mandatory:
