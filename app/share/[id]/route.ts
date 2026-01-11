@@ -4,12 +4,14 @@ import { query } from '@/lib/planetscale';
 interface ShareRow {
   id: string;
   html_content: string;
+  model: string | null;
   created_at: Date;
   expires_at: Date;
 }
 
-// Chat overlay to inject into shared HTML
-const chatOverlay = `
+// Generate chat overlay HTML with embedded model
+function generateChatOverlay(model: string | null): string {
+  return `
 <style>
   .maude-chat-overlay {
     position: fixed;
@@ -85,51 +87,38 @@ const chatOverlay = `
 </div>
 <script>
 (function() {
-  // Extract metadata from HTML comments
-  function extractMetadata() {
-    const html = document.documentElement.outerHTML;
-    const metadataMatch = html.match(/<!--[\\s\\S]*?=== REPORT METADATA ===[\\s\\S]*?=== END METADATA ===\\s*-->/);
-    if (!metadataMatch) return null;
+  // Model is embedded from database (works for all shares, old and new)
+  var REPORT_MODEL = ${JSON.stringify(model || '')};
 
-    const metadata = metadataMatch[0];
-    const modelMatch = metadata.match(/Model:\\s*([^\\n]+)/);
-
-    return {
-      model: modelMatch ? modelMatch[1].trim() : ''
-    };
-  }
-
-  const form = document.getElementById('maude-chat-form');
-  const input = document.getElementById('maude-chat-input');
+  var form = document.getElementById('maude-chat-form');
+  var input = document.getElementById('maude-chat-input');
 
   form.addEventListener('submit', function(e) {
     e.preventDefault();
-    const question = input.value.trim();
+    var question = input.value.trim();
     if (!question) return;
 
     // Extract share ID from current URL path (e.g., /share/abc123)
-    const pathParts = window.location.pathname.split('/');
-    const shareId = pathParts[pathParts.length - 1];
-
-    // Extract model from metadata
-    const metadata = extractMetadata();
-    const model = metadata ? metadata.model : '';
+    var pathParts = window.location.pathname.split('/');
+    var shareId = pathParts[pathParts.length - 1];
 
     // Redirect to main app with question, share ID, and model
-    const baseUrl = window.location.origin;
-    const params = new URLSearchParams();
+    var baseUrl = window.location.origin;
+    var params = new URLSearchParams();
     params.set('q', question);
     if (shareId) params.set('shareId', shareId);
-    if (model) params.set('model', model);
+    if (REPORT_MODEL) params.set('model', REPORT_MODEL);
 
     window.location.href = baseUrl + '/?' + params.toString();
   });
 })();
 </script>
 `;
+}
 
 // Inject chat overlay before </body> or at end of HTML
-function injectChatOverlay(html: string): string {
+function injectChatOverlay(html: string, model: string | null): string {
+  const chatOverlay = generateChatOverlay(model);
   const bodyCloseIndex = html.toLowerCase().lastIndexOf('</body>');
   if (bodyCloseIndex !== -1) {
     return html.slice(0, bodyCloseIndex) + chatOverlay + html.slice(bodyCloseIndex);
@@ -148,7 +137,7 @@ export async function GET(
 
   try {
     const result = await query<ShareRow>(
-      `SELECT id, html_content, created_at, expires_at
+      `SELECT id, html_content, model, created_at, expires_at
        FROM shares
        WHERE id = $1 AND expires_at > NOW()`,
       [id]
@@ -183,7 +172,7 @@ export async function GET(
 
     const share = result.rows[0];
     // Only inject chat overlay for standalone view, not embedded
-    const finalHtml = isEmbed ? share.html_content : injectChatOverlay(share.html_content);
+    const finalHtml = isEmbed ? share.html_content : injectChatOverlay(share.html_content, share.model);
 
     return new NextResponse(finalHtml, {
       status: 200,

@@ -138,10 +138,11 @@ async function saveHtmlContent(html: string, metadata?: HtmlMetadata): Promise<s
   try {
     const id = generateContentId();
     const htmlWithMetadata = metadata ? injectMetadataComments(html, metadata) : html;
+    const model = metadata?.model || null;
     await query(
-      `INSERT INTO shares (id, html_content, created_at, expires_at)
-       VALUES ($1, $2, NOW(), NOW() + INTERVAL '30 days')`,
-      [id, htmlWithMetadata]
+      `INSERT INTO shares (id, html_content, model, created_at, expires_at)
+       VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '30 days')`,
+      [id, htmlWithMetadata, model]
     );
     return id;
   } catch (error) {

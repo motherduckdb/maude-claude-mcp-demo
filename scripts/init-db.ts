@@ -69,9 +69,16 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS shares (
         id VARCHAR(255) PRIMARY KEY,
         html_content TEXT NOT NULL,
+        model VARCHAR(255),
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         expires_at TIMESTAMP NOT NULL
       );
+    `);
+
+    // Add model column if it doesn't exist (for existing tables)
+    console.log('Ensuring model column exists...');
+    await client.query(`
+      ALTER TABLE shares ADD COLUMN IF NOT EXISTS model VARCHAR(255);
     `);
 
     console.log('Creating index on id column...');
