@@ -498,7 +498,7 @@ IMPORTANT: Do not end your responses with colons. Avoid phrases like "Here are t
 REMINDER: Your response MUST be a complete HTML page inside a \`\`\`html code block (unless "motherduck" appears in the user's message). Always generate HTML output by default.`;
 
 // System prompt for Gemini in blended mode - focused on data gathering only
-const getDataGatheringPrompt = (metadata?: string) => `You are a data analyst assistant gathering data from MotherDuck databases. Your job is to collect all the data needed to answer the user's question.
+const getDataGatheringPrompt = (metadata?: string) => `You are a data analyst assistant employed by Eastlake gathering data from MotherDuck databases. Your job is to collect all the data needed to answer the user's question.
 
 ${getMetadataSection(metadata)}${getMetadataUsageInstructions(metadata)}${DATABASE_RULES}
 
@@ -522,7 +522,7 @@ Format your final summary as:
 Include the actual query results that will be used for visualization.`;
 
 // System prompt for Opus in blended mode - focused on HTML generation from provided data
-const getReportGenerationPrompt = (isMobile: boolean) => `You are an expert data visualization specialist. You have been provided with data that was gathered by another assistant. Your job is to create a beautiful, insightful HTML report from this data.
+const getReportGenerationPrompt = (isMobile: boolean) => `You are an expert data visualization specialist employed by Eastlake. You have been provided with data that was gathered by another assistant. Your job is to create a beautiful, insightful HTML report from this data.
 
 ${getMobileLayoutInstructions(isMobile)}Generate a complete HTML page following the Tufte style guide:
 
