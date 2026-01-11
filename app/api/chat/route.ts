@@ -411,7 +411,7 @@ const HTML_TEMPLATE = `HTML Template structure:
 </html>
 \`\`\``;
 
-const getSystemPrompt = (isMobile: boolean, metadata?: string) => `You are a helpful data assistant with access to MotherDuck databases through the Model Context Protocol (MCP).
+const getSystemPrompt = (isMobile: boolean, metadata?: string) => `You are a helpful data assistant with access to MotherDuck databases through the Model Context Protocol (MCP). All analysis, numbers and key people, companies, places and things should be based solely on data returned from the MotherDuck MCP server.
 
 **CRITICAL - DEFAULT RESPONSE FORMAT**: You MUST respond with a complete HTML page visualization (using the Tufte style guide below) for EVERY response, UNLESS the user's message contains the word "motherduck" (case-insensitive). This is your primary output format. Query the data first, then generate a full HTML document with your analysis.
 
