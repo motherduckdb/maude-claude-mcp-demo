@@ -477,7 +477,7 @@ const markdownComponents: Components = {
 };
 
 interface MessageContent {
-  type: 'text' | 'chart' | 'tool_use' | 'map' | 'html' | 'streaming_html' | 'intermediate_output' | 'shared_report';
+  type: 'text' | 'chart' | 'tool_use' | 'map' | 'html' | 'streaming_html' | 'intermediate_output' | 'shared_report' | 'suggestions';
   text?: string;
   chart?: ChartSpec;
   map?: MapSpec;
@@ -491,11 +491,18 @@ interface MessageContent {
   intermediateSource?: string;  // For intermediate output (e.g., 'gemini')
   intermediateContent?: string; // For intermediate output content
   shareId?: string;     // For shared report reference
+  suggestions?: string[]; // Follow-up question suggestions
 }
 
 interface Message {
   role: 'user' | 'assistant';
   content: string | MessageContent[];
+  messageId?: string; // Unique ID to track messages for async updates (e.g., suggestions)
+}
+
+// Generate unique message ID
+function generateMessageId(): string {
+  return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 }
 
 // Helper to filter visualization content (charts, maps, intermediate output)
@@ -509,7 +516,7 @@ const getVisualizationsAndHtml = (content: MessageContent[]): MessageContent[] =
     c.type === 'html' || c.type === 'streaming_html'
   );
 
-const EXAMPLE_PROMPTS = [
+const WELCOME_PROMPTS = [
   'What products do we sell, and how have they performed?',
   'Which customers buy the largest variety of products?',
   'Analyze sales by region and show a map with details.',
@@ -598,6 +605,79 @@ export default function ChatInterface() {
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
 
+  // Fetch follow-up question suggestions for a message
+  const fetchSuggestions = useCallback(async (
+    messageId: string,
+    question: string,
+    context: string,
+    model: string,
+    updateMessages: React.Dispatch<React.SetStateAction<Message[]>>
+  ) => {
+    try {
+      // Map model name to API model identifier
+      let modelId = 'sonnet';
+      if (model.includes('opus')) modelId = 'opus';
+      else if (model.includes('haiku')) modelId = 'haiku';
+
+      const response = await fetch('/api/suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, context, model: modelId }),
+      });
+
+      if (!response.ok) {
+        console.error('Failed to fetch suggestions');
+        return;
+      }
+
+      const data = await response.json();
+      if (data.suggestions && Array.isArray(data.suggestions)) {
+        // Update the message with suggestions
+        updateMessages(prev => {
+          return prev.map(msg => {
+            if (msg.messageId === messageId && Array.isArray(msg.content)) {
+              // Add suggestions block to the message content
+              const hasExistingSuggestions = msg.content.some(c => c.type === 'suggestions');
+              if (hasExistingSuggestions) return msg; // Don't add duplicates
+              return {
+                ...msg,
+                content: [...msg.content, { type: 'suggestions' as const, suggestions: data.suggestions as string[] }]
+              };
+            }
+            return msg;
+          });
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching suggestions:', error);
+    }
+  }, []);
+
+  // Animate typing text into input field, optionally auto-submit when done
+  const animateTyping = useCallback((text: string, autoSubmit: boolean) => {
+    let currentIndex = 0;
+    const typeSpeed = 15; // ms per character (fast typist)
+
+    const typeNextChar = () => {
+      if (currentIndex <= text.length) {
+        setInputValue(text.substring(0, currentIndex));
+        currentIndex++;
+        setTimeout(typeNextChar, typeSpeed);
+      } else if (autoSubmit) {
+        // Small delay before submitting to let user see the full text
+        setTimeout(() => {
+          // Trigger form submission by calling sendMessage
+          sendMessageRef.current?.(text);
+        }, 150);
+      }
+    };
+
+    typeNextChar();
+  }, []);
+
+  // Ref to hold sendMessage function for use in animateTyping
+  const sendMessageRef = useRef<((text: string) => void) | null>(null);
+
   const storageKey = 'mcp_chat_history';
   const [isHydrated, setIsHydrated] = useState(false);
   const [currentIsMobile, setCurrentIsMobile] = useState(false);
@@ -683,9 +763,9 @@ export default function ChatInterface() {
     if (shareId) {
       hasProcessedUrlParams.current = true;
 
-      // Set question in input if provided
+      // Animate question in input if provided
       if (question) {
-        setInputValue(question);
+        setTimeout(() => animateTyping(question, false), 200);
       }
 
       // Store share ID (will be sent to API to fetch full context)
@@ -1177,6 +1257,10 @@ export default function ChatInterface() {
     const isMobile = window.innerWidth <= 768;
     const userMessage: Message = { role: 'user', content: messageText };
 
+    // Generate unique messageId for tracking this response (for suggestions)
+    const assistantMessageId = generateMessageId();
+    const questionText = messageText; // Capture for suggestions
+
     // Use a promise to get the current messages after state update
     // This avoids race conditions with stale ref values
     const currentModelMessages = await new Promise<Message[]>((resolve) => {
@@ -1184,10 +1268,10 @@ export default function ChatInterface() {
         const msgs = prev[modelConfig.id] || [];
         // Schedule resolve after this state update
         setTimeout(() => resolve(msgs), 0);
-        // Add user message + assistant placeholder
+        // Add user message + assistant placeholder with messageId
         return {
           ...prev,
-          [modelConfig.id]: [...msgs, userMessage, { role: 'assistant', content: [] }]
+          [modelConfig.id]: [...msgs, userMessage, { role: 'assistant', content: [], messageId: assistantMessageId }]
         };
       });
     });
@@ -1208,24 +1292,50 @@ export default function ChatInterface() {
       apiMessages,
       isMobile,
       headToHeadAbortControllers.current[modelConfig.id].signal,
+      // onUpdate - preserve messageId when updating content
       (content) => setHeadToHeadMessages(prev => {
         const msgs = [...(prev[modelConfig.id] || [])];
         if (msgs.length > 0) {
-          msgs[msgs.length - 1] = { role: 'assistant', content };
+          msgs[msgs.length - 1] = { role: 'assistant', content, messageId: assistantMessageId };
         }
         return { ...prev, [modelConfig.id]: msgs };
       }),
       (tool) => setHeadToHeadToolRunning(prev => ({ ...prev, [modelConfig.id]: tool })),
       () => setHeadToHeadToolRunning(prev => ({ ...prev, [modelConfig.id]: null })),
+      // onDone - trigger suggestions fetch in background
       () => {
         setHeadToHeadLoading(prev => ({ ...prev, [modelConfig.id]: false }));
         // Don't call processQueueForModel here - it's handled by the .finally() in processQueueForModel
+
+        // Fetch suggestions in background (don't await)
+        setTimeout(() => {
+          const latestMessages = headToHeadMessagesRef.current[modelConfig.id] || [];
+          const assistantMsg = latestMessages.find(m => m.messageId === assistantMessageId);
+          if (assistantMsg && Array.isArray(assistantMsg.content)) {
+            // Extract context from chain_of_thought or text blocks
+            const cotBlock = assistantMsg.content.find(c => c.type === 'tool_use' && c.toolName === 'chain_of_thought');
+            const textBlock = assistantMsg.content.find(c => c.type === 'text');
+            const context = cotBlock?.toolText || textBlock?.text || '';
+
+            if (context.trim()) {
+              // Create a wrapper to update headToHeadMessages for this specific model
+              const updateModelMessages: React.Dispatch<React.SetStateAction<Message[]>> = (updater) => {
+                setHeadToHeadMessages(prev => {
+                  const currentMsgs = prev[modelConfig.id] || [];
+                  const newMsgs = typeof updater === 'function' ? updater(currentMsgs) : updater;
+                  return { ...prev, [modelConfig.id]: newMsgs };
+                });
+              };
+              fetchSuggestions(assistantMessageId, questionText, context, modelConfig.model, updateModelMessages);
+            }
+          }
+        }, 100);
       },
       (error) => {
         setHeadToHeadMessages(prev => {
           const msgs = [...(prev[modelConfig.id] || [])];
           if (msgs.length > 0) {
-            msgs[msgs.length - 1] = { role: 'assistant', content: [{ type: 'text', text: `Error: ${error}` }] };
+            msgs[msgs.length - 1] = { role: 'assistant', content: [{ type: 'text', text: `Error: ${error}` }], messageId: assistantMessageId };
           }
           return { ...prev, [modelConfig.id]: msgs };
         });
@@ -1233,7 +1343,7 @@ export default function ChatInterface() {
         // Don't call processQueueForModel here - it's handled by the .finally() in processQueueForModel
       },
     );
-  }, [runModelStream]);
+  }, [runModelStream, fetchSuggestions]);
 
   // Keep messageQueueRef in sync with state
   useEffect(() => {
@@ -1326,11 +1436,18 @@ export default function ChatInterface() {
         currentMessages[m.id] = [...(headToHeadMessages[m.id] || [])];
       });
 
+      // Generate messageIds for each model's assistant response (for suggestions)
+      const assistantMessageIds: Record<string, string> = {};
+      HEAD_TO_HEAD_MODELS.forEach(m => {
+        assistantMessageIds[m.id] = generateMessageId();
+      });
+      const questionText = text; // Capture for suggestions
+
       // Add user message + assistant placeholder to each model's conversation
       setHeadToHeadMessages(() => {
         const updated: Record<string, Message[]> = {};
         HEAD_TO_HEAD_MODELS.forEach(m => {
-          updated[m.id] = [...currentMessages[m.id], userMessage, { role: 'assistant', content: [] }];
+          updated[m.id] = [...currentMessages[m.id], userMessage, { role: 'assistant', content: [], messageId: assistantMessageIds[m.id] }];
         });
         return updated;
       });
@@ -1350,32 +1467,59 @@ export default function ChatInterface() {
         const modelMessages = [...currentMessages[modelConfig.id], userMessage];
         const apiMessages = messagesToApiFormat(modelMessages);
 
+        const modelMessageId = assistantMessageIds[modelConfig.id];
         await runModelStream(
           modelConfig.id,
           modelConfig.model,
           apiMessages,
           isMobile,
           headToHeadAbortControllers.current[modelConfig.id].signal,
+          // onUpdate - preserve messageId when updating content
           (content) => setHeadToHeadMessages(prev => {
             const msgs = [...(prev[modelConfig.id] || [])];
             // Update the last message (assistant response)
             if (msgs.length > 0) {
-              msgs[msgs.length - 1] = { role: 'assistant', content };
+              msgs[msgs.length - 1] = { role: 'assistant', content, messageId: modelMessageId };
             }
             return { ...prev, [modelConfig.id]: msgs };
           }),
           (tool) => setHeadToHeadToolRunning(prev => ({ ...prev, [modelConfig.id]: tool })),
           () => setHeadToHeadToolRunning(prev => ({ ...prev, [modelConfig.id]: null })),
+          // onDone - trigger suggestions fetch in background
           () => {
             setHeadToHeadLoading(prev => ({ ...prev, [modelConfig.id]: false }));
             // Process queue for this specific model
             processQueueForModel(modelConfig);
+
+            // Fetch suggestions in background (don't await)
+            setTimeout(() => {
+              const latestMessages = headToHeadMessagesRef.current[modelConfig.id] || [];
+              const assistantMsg = latestMessages.find(m => m.messageId === modelMessageId);
+              if (assistantMsg && Array.isArray(assistantMsg.content)) {
+                // Extract context from chain_of_thought or text blocks
+                const cotBlock = assistantMsg.content.find(c => c.type === 'tool_use' && c.toolName === 'chain_of_thought');
+                const textBlock = assistantMsg.content.find(c => c.type === 'text');
+                const context = cotBlock?.toolText || textBlock?.text || '';
+
+                if (context.trim()) {
+                  // Create a wrapper to update headToHeadMessages for this specific model
+                  const updateModelMessages: React.Dispatch<React.SetStateAction<Message[]>> = (updater) => {
+                    setHeadToHeadMessages(prev => {
+                      const currentMsgs = prev[modelConfig.id] || [];
+                      const newMsgs = typeof updater === 'function' ? updater(currentMsgs) : updater;
+                      return { ...prev, [modelConfig.id]: newMsgs };
+                    });
+                  };
+                  fetchSuggestions(modelMessageId, questionText, context, modelConfig.model, updateModelMessages);
+                }
+              }
+            }, 100);
           },
           (error) => {
             setHeadToHeadMessages(prev => {
               const msgs = [...(prev[modelConfig.id] || [])];
               if (msgs.length > 0) {
-                msgs[msgs.length - 1] = { role: 'assistant', content: [{ type: 'text', text: `Error: ${error}` }] };
+                msgs[msgs.length - 1] = { role: 'assistant', content: [{ type: 'text', text: `Error: ${error}` }], messageId: modelMessageId };
               }
               return { ...prev, [modelConfig.id]: msgs };
             });
@@ -1392,8 +1536,12 @@ export default function ChatInterface() {
     }
 
     // Standard single-model mode - use same runModelStream as head-to-head
-    // Add placeholder for assistant response
-    setMessages(prev => [...prev, { role: 'assistant', content: [] }]);
+    // Generate unique messageId for tracking this response (for suggestions)
+    const assistantMessageId = generateMessageId();
+    const questionText = text; // Capture for suggestions
+
+    // Add placeholder for assistant response with messageId
+    setMessages(prev => [...prev, { role: 'assistant', content: [], messageId: assistantMessageId }]);
 
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
@@ -1406,11 +1554,11 @@ export default function ChatInterface() {
       messagesToApiFormat(newMessages),
       isMobile,
       abortControllerRef.current.signal,
-      // onUpdate
+      // onUpdate - preserve messageId when updating content
       (content) => setMessages(prev => {
         const updated = [...prev];
         if (updated.length > 0) {
-          updated[updated.length - 1] = { role: 'assistant', content };
+          updated[updated.length - 1] = { role: 'assistant', content, messageId: assistantMessageId };
         }
         return updated;
       }),
@@ -1418,18 +1566,35 @@ export default function ChatInterface() {
       (tool) => setIsToolRunning(tool),
       // onToolEnd
       () => setIsToolRunning(null),
-      // onDone
+      // onDone - trigger suggestions fetch in background
       () => {
         setIsLoading(false);
         setIsToolRunning(null);
         abortControllerRef.current = null;
+
+        // Fetch suggestions in background (don't await)
+        // Get context from the completed message
+        setTimeout(() => {
+          const latestMessages = messagesRef.current;
+          const assistantMsg = latestMessages.find(m => m.messageId === assistantMessageId);
+          if (assistantMsg && Array.isArray(assistantMsg.content)) {
+            // Extract context from chain_of_thought or text blocks
+            const cotBlock = assistantMsg.content.find(c => c.type === 'tool_use' && c.toolName === 'chain_of_thought');
+            const textBlock = assistantMsg.content.find(c => c.type === 'text');
+            const context = cotBlock?.toolText || textBlock?.text || '';
+
+            if (context.trim()) {
+              fetchSuggestions(assistantMessageId, questionText, context, currentModelConfig.model, setMessages);
+            }
+          }
+        }, 100); // Small delay to ensure state is updated
       },
       // onError
       (error) => {
         setMessages(prev => {
           const updated = [...prev];
           if (updated.length > 0) {
-            updated[updated.length - 1] = { role: 'assistant', content: [{ type: 'text', text: `Error: ${error}` }] };
+            updated[updated.length - 1] = { role: 'assistant', content: [{ type: 'text', text: `Error: ${error}` }], messageId: assistantMessageId };
           }
           return updated;
         });
@@ -1439,7 +1604,12 @@ export default function ChatInterface() {
       },
       currentSharedReportId,
     )
-  }, [inputValue, isLoading, includeMetadata, currentModelConfig, isHeadToHead, headToHeadMessages, headToHeadLoading, runModelStream, processQueueForModel]);
+  }, [inputValue, isLoading, includeMetadata, currentModelConfig, isHeadToHead, headToHeadMessages, headToHeadLoading, runModelStream, processQueueForModel, fetchSuggestions]);
+
+  // Keep sendMessageRef updated for use in animateTyping
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
 
   // Process queued messages when loading completes (standard mode only)
   // Head-to-head mode handles queue processing per-model via processQueueForModel
@@ -1528,8 +1698,13 @@ export default function ChatInterface() {
     localStorage.removeItem('mcp_head_to_head_history');
   };
 
-  const handleExampleClick = (example: string) => {
-    sendMessage(example);
+  const handleWelcomePromptClick = (example: string) => {
+    animateTyping(example, true);
+  };
+
+  const handleWelcomePromptRightClick = (example: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    animateTyping(example, false);
   };
 
   // Helper to check if a message has content worth rendering
@@ -1616,6 +1791,29 @@ export default function ChatInterface() {
                   />
                 );
               }
+              if (block.type === 'suggestions' && block.suggestions && block.suggestions.length > 0) {
+                return (
+                  <div key={blockKey} className="suggestions-container">
+                    <div className="suggestions-label">Suggested follow-up prompts:</div>
+                    <div className="suggestions-buttons">
+                      {block.suggestions.map((suggestion, suggIdx) => (
+                        <button
+                          key={suggIdx}
+                          className="suggestion-btn"
+                          onClick={() => animateTyping(suggestion, true)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            animateTyping(suggestion, false);
+                          }}
+                          title={`Click to ask, right-click to edit first`}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
               return null;
             })
           )}
@@ -1660,12 +1858,14 @@ export default function ChatInterface() {
           <div className="chat-welcome">
             <h2><span className="welcome-full">Welcome to {currentModelConfig.appName}</span><span className="welcome-short">Welcome</span></h2>
             <p>We've hooked up this interface to MotherDuck using the MotherDuck MCP Server. You have access to business data for a fictitious business, Eastlake, which manufactures and sells products to businesses. Start asking it some questions.</p>
-            <div className="chat-examples">
-              {EXAMPLE_PROMPTS.map((example, idx) => (
+            <div className="welcome-prompts">
+              {WELCOME_PROMPTS.map((example, idx) => (
                 <button
                   key={idx}
-                  className="chat-example"
-                  onClick={() => handleExampleClick(example)}
+                  className="welcome-prompt"
+                  onClick={() => handleWelcomePromptClick(example)}
+                  onContextMenu={(e) => handleWelcomePromptRightClick(example, e)}
+                  title="Click to ask, right-click to edit first"
                 >
                   {example}
                 </button>
