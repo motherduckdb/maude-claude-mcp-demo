@@ -161,6 +161,8 @@ npm run build
 
 ## Deployment
 
+**Live:** https://motherduck-mcp-demo.vercel.app/
+
 The app is configured for Vercel deployment with GitHub integration. Push to `main` to deploy.
 
 ```bash
